@@ -13,7 +13,7 @@ This guide will help you deploy the Polymarket Orderbook Monitor on a fresh Ubun
 ### One-Command Installation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Trust412/Polymarket-spike-bot-v1/main/orderbook-monitor/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/MyThirdRome/newpol/main/install.sh | bash
 ```
 
 ### Manual Installation
@@ -21,8 +21,8 @@ curl -sSL https://raw.githubusercontent.com/Trust412/Polymarket-spike-bot-v1/mai
 1. **Clone the repository:**
 ```bash
 cd ~
-git clone https://github.com/Trust412/Polymarket-spike-bot-v1.git
-cd Polymarket-spike-bot-v1/orderbook-monitor
+git clone https://github.com/MyThirdRome/newpol.git
+cd newpol
 ```
 
 2. **Run the installation script:**

@@ -30,7 +30,7 @@ All files are committed and ready to push to GitHub:
 Once you push to GitHub, users can install with:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_USERNAME/polymarket-orderbook-monitor/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/MyThirdRome/newpol/main/install.sh | bash
 ```
 
 ### What the Script Does
@@ -52,8 +52,8 @@ curl -sSL https://raw.githubusercontent.com/YOUR_USERNAME/polymarket-orderbook-m
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/polymarket-orderbook-monitor.git
-cd polymarket-orderbook-monitor
+git clone https://github.com/MyThirdRome/newpol.git
+cd newpol
 
 # Run installation script
 chmod +x install.sh

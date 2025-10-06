@@ -27,9 +27,11 @@ This will push the orderbook-monitor as a subdirectory.
 2. **Push to the new repository:**
 ```bash
 cd /workspaces/polymarket-orderbook-monitor
-git remote add origin https://github.com/YOUR_USERNAME/polymarket-orderbook-monitor.git
+git remote add origin https://github.com/MyThirdRome/newpol.git
 git push -u origin main
 ```
+
+✅ **ALREADY PUSHED TO:** https://github.com/MyThirdRome/newpol
 
 ## Files Ready to Push
 
@@ -40,25 +42,19 @@ git push -u origin main
 ✅ .gitignore configured
 ✅ No sensitive data included
 
-## After Pushing
-
-Update the DEPLOYMENT.md file with the correct repository URL:
-```bash
-# Replace this line in DEPLOYMENT.md:
-curl -sSL https://raw.githubusercontent.com/YOUR_USERNAME/polymarket-orderbook-monitor/main/install.sh | bash
-```
-
 ## Fresh Server Installation Command
 
-Once pushed, users can install with:
+✅ **Repository:** https://github.com/MyThirdRome/newpol
+
+Users can install with one command:
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_USERNAME/polymarket-orderbook-monitor/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/MyThirdRome/newpol/main/install.sh | bash
 ```
 
 Or manually:
 ```bash
-git clone https://github.com/YOUR_USERNAME/polymarket-orderbook-monitor.git
-cd polymarket-orderbook-monitor
+git clone https://github.com/MyThirdRome/newpol.git
+cd newpol
 chmod +x install.sh
 ./install.sh
 ```
