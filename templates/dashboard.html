@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polymarket Orderbook Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-start {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-stop {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-refresh {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .status-dot.running {
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.stopped {
+            background: #ef4444;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+
+
+        .orderbook-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .orderbook-table th {
+            background: #f3f4f6;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .orderbook-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .price-bid {
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        .price-ask {
+            color: #ef4444;
+            font-weight: 600;
+        }
+
+
+
+
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-box {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Polymarket Orderbook Monitor</h1>
+            <p>Real-time sports orderbook tracking with ATL detection</p>
+            
+            <div class="controls">
+                <button id="startBtn" class="btn btn-start" onclick="startMonitor()">▶ Start Monitor</button>
+                <button id="stopBtn" class="btn btn-stop" onclick="stopMonitor()" disabled>⏹ Stop Monitor</button>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-label">Monitor Status</div>
+                <div class="stat-value" id="statusText">
+                    <span class="status-dot stopped"></span>Stopped
+                </div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">WebSocket</div>
+                <div class="stat-value" id="wsStatusText">
+                    <span class="status-dot stopped"></span>Disconnected
+                </div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">⚡ Avg Latency</div>
+                <div class="stat-value" id="latencyText">-</div>
+            </div>
+        </div>
+
+        <div class="card full-width">
+            <h2>📈 Live Orderbooks</h2>
+            <div id="orderbooksList">
+                <p style="text-align: center; color: #666; padding: 40px;">
+                    Subscribe to matches and start monitoring to see orderbooks
+                </p>
+            </div>
+        </div>
+
+
+
+        <div class="card full-width">
+            <h2>🎯 Best Matches</h2>
+            <div id="totalRecordsContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        // Update status every 500ms for real-time latency display
+        setInterval(updateStatus, 500);
+        updateStatus();
+
+        // Update orderbooks every second
+        setInterval(updateOrderbooks, 1000);
+        
+        // Update total records every 5 seconds
+        setInterval(updateTotalRecords, 5000);
+
+
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                // Update monitor status
+                const statusDot = data.running ? '<span class="status-dot running"></span>' : '<span class="status-dot stopped"></span>';
+                const statusText = data.running ? 'Running' : 'Stopped';
+                document.getElementById('statusText').innerHTML = statusDot + statusText;
+                
+                // Update WebSocket status
+                const wsDot = data.websocket_connected ? '<span class="status-dot running"></span>' : '<span class="status-dot stopped"></span>';
+                const wsText = data.websocket_connected ? 'Connected' : 'Disconnected';
+                document.getElementById('wsStatusText').innerHTML = wsDot + wsText;
+                
+                // Update latency (show decimal places for sub-millisecond precision)
+                if (data.avg_latency_ms !== undefined && data.avg_latency_ms > 0) {
+                    const latency = data.avg_latency_ms;
+                    if (latency < 1) {
+                        document.getElementById('latencyText').textContent = latency.toFixed(2) + 'ms';
+                    } else {
+                        document.getElementById('latencyText').textContent = Math.round(latency) + 'ms';
+                    }
+                } else {
+                    document.getElementById('latencyText').textContent = '-';
+                }
+                
+                document.getElementById('startBtn').disabled = data.running;
+                document.getElementById('stopBtn').disabled = !data.running;
+            } catch (error) {
+                console.error('Error updating status:', error);
+            }
+        }
+
+        async function startMonitor() {
+            try {
+                const response = await fetch('/api/start', {method: 'POST'});
+                const data = await response.json();
+                
+                if (!data.success) {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error starting monitor:', error);
+            }
+        }
+
+        async function stopMonitor() {
+            try {
+                await fetch('/api/stop', {method: 'POST'});
+            } catch (error) {
+                console.error('Error stopping monitor:', error);
+            }
+        }
+
+        async function updateOrderbooks() {
+            try {
+                const response = await fetch('/api/orderbooks');
+                const orderbooks = await response.json();
+                
+                const container = document.getElementById('orderbooksList');
+                
+                if (orderbooks.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No active orderbooks</p>';
+                    return;
+                }
+                
+                // Get ATL data
+                const atlResponse = await fetch('/api/atl');
+                const atlRecords = await atlResponse.json();
+                
+                // Create ATL lookup
+                const atlLookup = {};
+                atlRecords.forEach(atl => {
+                    if (atl.side === 'ask') {
+                        atlLookup[atl.market_name] = atl;
+                    }
+                });
+                
+                // Separate markets by type
+                const moneyline = orderbooks.filter(ob => 
+                    !ob.market_name.includes('O/U') && 
+                    !ob.market_name.includes('Spread')
+                );
+                const spread = orderbooks.filter(ob => ob.market_name.includes('Spread'));
+                const totals = orderbooks.filter(ob => ob.market_name.includes('O/U'));
+                
+                // Build HTML
+                let html = '<div style="padding: 20px;">';
+                
+                // Moneyline section
+                if (moneyline.length > 0) {
+                    html += '<h3 style="margin-bottom: 20px; color: #333;">💰 Moneyline (Winner)</h3>';
+                    html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px;">';
+                    moneyline.forEach((ob, idx) => {
+                        const teamName = ob.market_name.split(' - ')[1] || 'Team ' + (idx + 1);
+                        const isDodgers = teamName.includes('Dodgers');
+                        const atl = atlLookup[ob.market_name];
+                        
+                        html += `
+                        <div style="background: ${isDodgers ? '#e0f2fe' : '#fef3c7'}; padding: 20px; border-radius: 10px; border: 2px solid ${isDodgers ? '#0284c7' : '#f59e0b'};">
+                            <div style="font-size: 1.1em; font-weight: bold; color: #333; margin-bottom: 10px;">
+                                ${isDodgers ? '🔵' : '🟡'} ${teamName}
+                            </div>
+                            <div style="font-size: 2em; font-weight: bold; color: ${isDodgers ? '#0284c7' : '#f59e0b'};">
+                                $${ob.best_ask.toFixed(2)}
+                            </div>
+                            <div style="color: #666; font-size: 0.85em; margin-top: 5px;">
+                                ATL: ${atl ? '$' + atl.price.toFixed(2) : 'N/A'}
+                            </div>
+                        </div>
+                        `;
+                    });
+                    html += '</div>';
+                }
+                
+                // Spread section
+                if (spread.length > 0) {
+                    html += '<h3 style="margin-bottom: 15px; color: #333;">📊 Spread</h3>';
+                    html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px;">';
+                    spread.forEach(ob => {
+                        const parts = ob.market_name.split(' - ');
+                        const teamName = parts[parts.length - 1];
+                        const isDodgers = teamName.includes('Dodgers');
+                        const atl = atlLookup[ob.market_name];
+                        
+                        html += `
+                        <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; border: 1px solid #d1d5db;">
+                            <div style="font-size: 0.95em; font-weight: bold; color: #333; margin-bottom: 8px;">
+                                ${isDodgers ? '🔵' : '🟡'} ${teamName}
+                            </div>
+                            <div style="font-size: 1.5em; font-weight: bold; color: #374151;">
+                                $${ob.best_ask.toFixed(2)}
+                            </div>
+                            <div style="color: #666; font-size: 0.8em; margin-top: 3px;">
+                                ATL: ${atl ? '$' + atl.price.toFixed(2) : 'N/A'}
+                            </div>
+                        </div>
+                        `;
+                    });
+                    html += '</div>';
+                }
+                
+                // Totals section
+                if (totals.length > 0) {
+                    html += '<h3 style="margin-bottom: 15px; color: #333;">🎯 Over/Under 7.5</h3>';
+                    html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">';
+                    totals.forEach(ob => {
+                        const parts = ob.market_name.split(' - ');
+                        const outcome = parts[parts.length - 1];
+                        const isOver = outcome.includes('Over');
+                        const atl = atlLookup[ob.market_name];
+                        
+                        html += `
+                        <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; border: 1px solid #d1d5db;">
+                            <div style="font-size: 0.95em; font-weight: bold; color: #333; margin-bottom: 8px;">
+                                ${isOver ? '⬆️' : '⬇️'} ${outcome}
+                            </div>
+                            <div style="font-size: 1.5em; font-weight: bold; color: #374151;">
+                                $${ob.best_ask.toFixed(2)}
+                            </div>
+                            <div style="color: #666; font-size: 0.8em; margin-top: 3px;">
+                                ATL: ${atl ? '$' + atl.price.toFixed(2) : 'N/A'}
+                            </div>
+                        </div>
+                        `;
+                    });
+                    html += '</div>';
+                }
+                
+                html += '</div>';
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error updating orderbooks:', error);
+            }
+        }
+
+
+
+
+
+        async function updateTotalRecords() {
+            try {
+                const response = await fetch('/api/total-records?limit=100');
+                const records = await response.json();
+                
+                const container = document.getElementById('totalRecordsContainer');
+                
+                if (records.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No data yet. Start monitoring...</p>';
+                    return;
+                }
+                
+                // Group by event and market type, keep only latest
+                const latestRecords = {};
+                records.forEach(record => {
+                    const key = `${record.event_title}_${record.market_type}`;
+                    if (!latestRecords[key] || record.timestamp > latestRecords[key].timestamp) {
+                        latestRecords[key] = record;
+                    }
+                });
+                
+                const uniqueRecords = Object.values(latestRecords);
+                
+                let html = '<div style="padding: 20px;"><table class="orderbook-table"><thead><tr>';
+                html += '<th>Event</th><th>Type</th><th>Side 1</th><th>Price 1</th><th>Side 2</th><th>Price 2</th><th>Total</th><th>Status</th>';
+                html += '</tr></thead><tbody>';
+                
+                uniqueRecords.sort((a, b) => a.total - b.total).forEach(record => {
+                    const statusBadge = record.is_best 
+                        ? '<span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 4px; font-size: 0.85em; font-weight: bold;">🎯 BEST</span>'
+                        : '<span style="background: #6b7280; color: white; padding: 4px 12px; border-radius: 4px; font-size: 0.85em;">Normal</span>';
+                    
+                    html += `
+                    <tr style="${record.is_best ? 'background: #d1fae5; font-weight: 600;' : ''}">
+                        <td style="font-weight: 600;">${record.event_title}</td>
+                        <td>${record.market_type}</td>
+                        <td>${record.side1_name}</td>
+                        <td class="price-ask">$${record.side1_price.toFixed(2)}</td>
+                        <td>${record.side2_name}</td>
+                        <td class="price-ask">$${record.side2_price.toFixed(2)}</td>
+                        <td style="font-weight: bold; font-size: 1.1em; ${record.is_best ? 'color: #10b981;' : ''}">$${record.total.toFixed(2)}</td>
+                        <td>${statusBadge}</td>
+                    </tr>
+                    `;
+                });
+                
+                html += '</tbody></table></div>';
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error updating total records:', error);
+            }
+        }
+    </script>
+</body>
+</html>
