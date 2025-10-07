@@ -288,7 +288,19 @@ class OrderbookMonitor:
                             for idx, token_id in enumerate(token_ids):
                                 if token_id:
                                     outcome_name = outcomes[idx] if idx < len(outcomes) else f"Option {idx+1}"
-                                    market_name = f"{market.get('question', 'Unknown')} - {outcome_name}"
+                                    question = market.get('question', 'Unknown')
+                                    
+                                    # Parse question to get better names for 3-way markets
+                                    # e.g., "Will Nottingham Forest win?" -> "Nottingham Forest"
+                                    if outcome_name == "Yes" and "Will" in question:
+                                        if "win" in question.lower():
+                                            # Extract team name from "Will X win on..."
+                                            team = question.split("Will ")[-1].split(" win")[0]
+                                            outcome_name = team
+                                        elif "draw" in question.lower():
+                                            outcome_name = "Draw"
+                                    
+                                    market_name = f"{question} - {outcome_name}"
                                     self.token_to_market[token_id] = market_name
                                     self.market_to_token[market_name] = token_id
                                     all_token_ids.append(token_id)
@@ -598,7 +610,12 @@ class OrderbookMonitor:
                 if 'Will' in event_name and ('win' in event_name.lower() or 'draw' in event_name.lower()):
                     # Extract base event name (e.g., "Nottingham Forest vs. Chelsea")
                     if 'vs.' in event_name or 'vs' in event_name:
-                        base_event = event_name.split('Will ')[-1].split(' win')[0].split(' end')[0]
+                        # Extract the "X vs Y" part
+                        if ' vs. ' in event_name:
+                            base_event = event_name.split('Will ')[-1].split(' vs. ')[0] + ' vs. ' + \
+                                        event_name.split(' vs. ')[1].split(' win')[0].split(' end')[0]
+                        else:
+                            base_event = event_name.split('Will ')[-1].split(' win')[0].split(' end')[0]
                         event_name = base_event
                         market_type = '3-Way Moneyline'
                 
