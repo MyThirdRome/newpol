@@ -17,6 +17,7 @@ import config
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import asyncio
 import websockets
+from arbitrage_executor import ArbitrageExecutor, ArbitrageOpportunity
 
 # Setup logging
 logging.basicConfig(
@@ -100,7 +101,7 @@ class SportMatch:
 class OrderbookMonitor:
     """Monitor Polymarket orderbooks via WebSocket"""
     
-    def __init__(self):
+    def __init__(self, arbitrage_executor: Optional[ArbitrageExecutor] = None):
         self.api_base = config.CLOB_API_BASE
         self.data_api = config.DATA_API_BASE
         self.ws_url = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
@@ -111,11 +112,15 @@ class OrderbookMonitor:
         self.atl_records: Dict[str, ATLRecord] = {}
         self.current_snapshots: Dict[str, OrderbookSnapshot] = {}
         self.token_to_market: Dict[str, str] = {}  # Map token_id to market_name
+        self.market_to_token: Dict[str, str] = {}  # Map market_name to token_id
         
         # Best match tracking (pairs under $1)
         self.best_matches: List[BestMatch] = []
         self.total_records: List[TotalRecord] = []
         self.last_totals: Dict[str, float] = {}  # Track last total for each market pair
+        
+        # Arbitrage executor (optional)
+        self.arbitrage_executor = arbitrage_executor
         
         self.running = False
         self.ws_connection = None
@@ -279,12 +284,13 @@ class OrderbookMonitor:
                                 token_ids = []
                                 outcomes = []
                             
-                            # Map token IDs to market names
+                            # Map token IDs to market names (bidirectional)
                             for idx, token_id in enumerate(token_ids):
                                 if token_id:
                                     outcome_name = outcomes[idx] if idx < len(outcomes) else f"Option {idx+1}"
                                     market_name = f"{market.get('question', 'Unknown')} - {outcome_name}"
                                     self.token_to_market[token_id] = market_name
+                                    self.market_to_token[market_name] = token_id
                                     all_token_ids.append(token_id)
                     
                     # Subscribe with correct format: assets_ids and type
@@ -638,9 +644,67 @@ class OrderbookMonitor:
                                 )
                                 self.best_matches.append(best_match)
                                 self.log(f"🎯 BEST MATCH! {event_name} {market_type}: ${total:.2f} ({side1['outcome']}: ${side1['snapshot'].best_ask:.2f} + {side2['outcome']}: ${side2['snapshot'].best_ask:.2f})", "WARNING")
+                                
+                                # Auto-execute arbitrage if enabled
+                                if self.arbitrage_executor and self.arbitrage_executor.should_execute(total):
+                                    self.execute_arbitrage(
+                                        event_name=event_name,
+                                        market_type=market_type,
+                                        side1_name=side1['outcome'],
+                                        side1_price=side1['snapshot'].best_ask,
+                                        side1_market_name=side1['snapshot'].market_name,
+                                        side2_name=side2['outcome'],
+                                        side2_price=side2['snapshot'].best_ask,
+                                        side2_market_name=side2['snapshot'].market_name,
+                                        total=total
+                                    )
         
         except Exception as e:
             self.log(f"❌ Error checking best matches: {str(e)}", "ERROR")
+    
+    def execute_arbitrage(self, event_name: str, market_type: str, 
+                         side1_name: str, side1_price: float, side1_market_name: str,
+                         side2_name: str, side2_price: float, side2_market_name: str,
+                         total: float):
+        """Execute arbitrage trade"""
+        try:
+            # Get token IDs
+            side1_token_id = self.market_to_token.get(side1_market_name)
+            side2_token_id = self.market_to_token.get(side2_market_name)
+            
+            if not side1_token_id or not side2_token_id:
+                self.log(f"❌ Cannot execute: Token IDs not found", "ERROR")
+                return
+            
+            # Calculate profit percentage
+            profit_percent = ((1.0 - total) / total) * 100
+            
+            # Create opportunity
+            opportunity = ArbitrageOpportunity(
+                event_title=event_name,
+                market_type=market_type,
+                side1_token_id=side1_token_id,
+                side1_name=side1_name,
+                side1_price=side1_price,
+                side2_token_id=side2_token_id,
+                side2_name=side2_name,
+                side2_price=side2_price,
+                total=total,
+                profit_percent=profit_percent,
+                timestamp=time.time()
+            )
+            
+            # Execute
+            self.log(f"🚀 Executing arbitrage: {event_name} ({market_type}) - {profit_percent:.2f}% profit", "WARNING")
+            execution = self.arbitrage_executor.execute_arbitrage(opportunity)
+            
+            if execution.success:
+                self.log(f"✅ Arbitrage executed successfully! Orders: {execution.order1_id}, {execution.order2_id}", "WARNING")
+            else:
+                self.log(f"❌ Arbitrage execution failed: {execution.error}", "ERROR")
+                
+        except Exception as e:
+            self.log(f"❌ Error executing arbitrage: {str(e)}", "ERROR")
     
     def start(self):
         """Start monitoring"""

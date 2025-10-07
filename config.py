@@ -40,3 +40,9 @@ ATH_FLASH_DURATION = 3000  # milliseconds to show "NEW!" badge
 # Performance
 ENABLE_THREADING = True
 DAEMON_THREADS = True
+
+# Arbitrage Trading (IMPORTANT: Set these carefully!)
+ARBITRAGE_ENABLED = False  # Set to True to enable auto-trading
+ARBITRAGE_PRIVATE_KEY = ""  # Your Ethereum private key (KEEP SECRET!)
+ARBITRAGE_BANKROLL = 100.0  # Amount in USDC to use per arbitrage
+ARBITRAGE_MIN_PROFIT_PERCENT = 1.0  # Minimum profit % to execute (1% = 1.0)

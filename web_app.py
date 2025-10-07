@@ -10,8 +10,26 @@ from flask_sock import Sock
 import json
 import threading
 import time
-from orderbook_monitor import monitor
+from orderbook_monitor import OrderbookMonitor
+from arbitrage_executor import ArbitrageExecutor
 import config
+
+# Initialize arbitrage executor if enabled
+arbitrage_executor = None
+if config.ARBITRAGE_ENABLED and config.ARBITRAGE_PRIVATE_KEY:
+    try:
+        arbitrage_executor = ArbitrageExecutor(
+            private_key=config.ARBITRAGE_PRIVATE_KEY,
+            bankroll=config.ARBITRAGE_BANKROLL,
+            min_profit_percent=config.ARBITRAGE_MIN_PROFIT_PERCENT,
+            auto_execute=True
+        )
+        print("✅ Arbitrage executor initialized")
+    except Exception as e:
+        print(f"❌ Failed to initialize arbitrage executor: {e}")
+
+# Initialize monitor with optional arbitrage executor
+monitor = OrderbookMonitor(arbitrage_executor=arbitrage_executor)
 
 app = Flask(__name__)
 CORS(app)
@@ -233,6 +251,35 @@ def api_total_records():
     """Get historical total records"""
     limit = request.args.get('limit', 100, type=int)
     return jsonify(monitor.get_total_records(limit))
+
+@app.route('/api/arbitrage/stats')
+def api_arbitrage_stats():
+    """Get arbitrage execution statistics"""
+    if arbitrage_executor:
+        return jsonify(arbitrage_executor.get_stats())
+    return jsonify({
+        'enabled': False,
+        'message': 'Arbitrage executor not initialized'
+    })
+
+@app.route('/api/arbitrage/executions')
+def api_arbitrage_executions():
+    """Get arbitrage execution history"""
+    if arbitrage_executor:
+        limit = request.args.get('limit', 50, type=int)
+        executions = arbitrage_executor.executions[-limit:]
+        return jsonify([{
+            'event_title': e.opportunity.event_title,
+            'market_type': e.opportunity.market_type,
+            'total': e.opportunity.total,
+            'profit_percent': e.opportunity.profit_percent,
+            'stake1': e.stake1,
+            'stake2': e.stake2,
+            'success': e.success,
+            'error': e.error,
+            'timestamp': e.timestamp
+        } for e in executions])
+    return jsonify([])
 
 @sock.route('/ws/orderbooks')
 def ws_orderbooks(ws):
