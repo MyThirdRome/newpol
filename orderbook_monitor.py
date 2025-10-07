@@ -572,7 +572,7 @@ class OrderbookMonitor:
             self.log(f"📉 NEW ATL! {market_name} {side.upper()}: ${price:.4f} (size: {size:.1f})", "WARNING")
     
     def check_best_matches(self):
-        """Check for best matches where both sides total under $1"""
+        """Check for best matches where sides total under $1 (2-way or 3-way)"""
         try:
             # Group snapshots by event and market type
             event_markets = defaultdict(lambda: defaultdict(list))
@@ -593,14 +593,24 @@ class OrderbookMonitor:
                 elif 'O/U' in event_name or 'Over/Under' in event_name:
                     market_type = 'O/U'
                 
+                # Special handling for 3-way markets (Win/Draw/Win)
+                # Look for "Will X win" and "Will X vs Y end in a draw"
+                if 'Will' in event_name and ('win' in event_name.lower() or 'draw' in event_name.lower()):
+                    # Extract base event name (e.g., "Nottingham Forest vs. Chelsea")
+                    if 'vs.' in event_name or 'vs' in event_name:
+                        base_event = event_name.split('Will ')[-1].split(' win')[0].split(' end')[0]
+                        event_name = base_event
+                        market_type = '3-Way Moneyline'
+                
                 event_markets[event_name][market_type].append({
                     'snapshot': snapshot,
                     'outcome': outcome
                 })
             
-            # Check each event's market types for pairs
+            # Check each event's market types for pairs or triplets
             for event_name, market_types in event_markets.items():
                 for market_type, outcomes in market_types.items():
+                    # Handle 2-way markets
                     if len(outcomes) == 2:
                         # We have a pair
                         side1 = outcomes[0]
@@ -658,6 +668,56 @@ class OrderbookMonitor:
                                         side2_market_name=side2['snapshot'].market_name,
                                         total=total
                                     )
+                    
+                    # Handle 3-way markets (Team1, Draw, Team2)
+                    elif len(outcomes) == 3:
+                        # Calculate total of all 3 sides
+                        total = sum(o['snapshot'].best_ask for o in outcomes)
+                        
+                        # Create unique key for this market triplet
+                        pair_key = f"{event_name}_{market_type}"
+                        
+                        # Check if total changed
+                        if pair_key not in self.last_totals or abs(self.last_totals[pair_key] - total) > 0.001:
+                            # Record this total
+                            record = TotalRecord(
+                                event_id=pair_key,
+                                event_title=event_name,
+                                market_type=market_type,
+                                side1_name=f"{outcomes[0]['outcome']}/{outcomes[1]['outcome']}/{outcomes[2]['outcome']}",
+                                side1_price=outcomes[0]['snapshot'].best_ask,
+                                side2_name="3-way",
+                                side2_price=outcomes[1]['snapshot'].best_ask + outcomes[2]['snapshot'].best_ask,
+                                total=total,
+                                timestamp=time.time(),
+                                is_best=(total < 1.0)
+                            )
+                            self.total_records.append(record)
+                            self.last_totals[pair_key] = total
+                            
+                            # If under $1, it's a best match
+                            if total < 1.0:
+                                # Log all 3 sides
+                                sides_str = " + ".join([f"{o['outcome']}: ${o['snapshot'].best_ask:.2f}" for o in outcomes])
+                                self.log(f"🎯 3-WAY BEST MATCH! {event_name}: ${total:.2f} ({sides_str})", "WARNING")
+                                
+                                # Create best match record
+                                best_match = BestMatch(
+                                    event_id=pair_key,
+                                    event_title=event_name,
+                                    market_type=market_type,
+                                    side1_name=outcomes[0]['outcome'],
+                                    side1_price=outcomes[0]['snapshot'].best_ask,
+                                    side2_name=f"{outcomes[1]['outcome']}/{outcomes[2]['outcome']}",
+                                    side2_price=outcomes[1]['snapshot'].best_ask + outcomes[2]['snapshot'].best_ask,
+                                    total=total,
+                                    timestamp=time.time()
+                                )
+                                self.best_matches.append(best_match)
+                                
+                                # Note: 3-way arbitrage execution would need different logic
+                                # For now, just log the opportunity
+                                self.log(f"💡 3-way arbitrage detected but auto-execution not yet supported", "INFO")
         
         except Exception as e:
             self.log(f"❌ Error checking best matches: {str(e)}", "ERROR")

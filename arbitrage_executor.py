@@ -84,7 +84,7 @@ class ArbitrageExecutor:
     
     def calculate_stakes(self, price1: float, price2: float, bankroll: float) -> Tuple[float, float]:
         """
-        Calculate optimal stakes for equal profit on both outcomes
+        Calculate optimal stakes for equal profit on both outcomes (2-way)
         
         Args:
             price1: Price of side 1 (e.g., 0.49)
@@ -106,6 +106,32 @@ class ArbitrageExecutor:
         stake2 = bankroll * price2 / total_price
         
         return stake1, stake2
+    
+    def calculate_stakes_3way(self, price1: float, price2: float, price3: float, 
+                              bankroll: float) -> Tuple[float, float, float]:
+        """
+        Calculate optimal stakes for equal profit on all three outcomes (3-way)
+        
+        Args:
+            price1: Price of outcome 1 (e.g., Team1 win)
+            price2: Price of outcome 2 (e.g., Draw)
+            price3: Price of outcome 3 (e.g., Team2 win)
+            bankroll: Total amount to stake
+            
+        Returns:
+            (stake1, stake2, stake3) - Stakes for each outcome
+        """
+        # For 3-way arbitrage with equal profit:
+        # stake1/price1 = stake2/price2 = stake3/price3
+        # stake1 + stake2 + stake3 = bankroll
+        # Solution: stake_i = bankroll * price_i / (price1 + price2 + price3)
+        
+        total_price = price1 + price2 + price3
+        stake1 = bankroll * price1 / total_price
+        stake2 = bankroll * price2 / total_price
+        stake3 = bankroll * price3 / total_price
+        
+        return stake1, stake2, stake3
     
     def calculate_profit(self, price1: float, price2: float, stake1: float, stake2: float) -> float:
         """

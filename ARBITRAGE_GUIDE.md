@@ -17,17 +17,31 @@ When the system detects a best match (total under $1.00), it:
 2. **Places buy orders** on both sides simultaneously
 3. **Guarantees profit** regardless of which side wins
 
-### Example:
+### Example (2-Way):
 
 **Dodgers $0.49 + Phillies $0.48 = $0.97**
 
-With $100 bankroll:
-- Stake on Dodgers: $50.52
-- Stake on Phillies: $49.48
-- **Guaranteed profit: $3.09** (3.09% return)
+With $11 bankroll:
+- Stake on Dodgers: $5.56
+- Stake on Phillies: $5.44
+- **Guaranteed profit: $0.34** (3.09% return)
 
-If Dodgers win: Payout $103.09 - Staked $100 = **$3.09 profit**  
-If Phillies win: Payout $103.09 - Staked $100 = **$3.09 profit**
+If Dodgers win: Payout $11.34 - Staked $11 = **$0.34 profit**  
+If Phillies win: Payout $11.34 - Staked $11 = **$0.34 profit**
+
+### Example (3-Way):
+
+**Nottingham $0.35 + Draw $0.30 + Chelsea $0.32 = $0.97**
+
+With $11 bankroll:
+- Stake on Nottingham: $3.97
+- Stake on Draw: $3.40
+- Stake on Chelsea: $3.63
+- **Guaranteed profit: $0.34** (3.09% return)
+
+If Nottingham wins: Payout $11.34 - Staked $11 = **$0.34 profit**  
+If Draw: Payout $11.34 - Staked $11 = **$0.34 profit**  
+If Chelsea wins: Payout $11.34 - Staked $11 = **$0.34 profit**
 
 ## Configuration
 
@@ -136,14 +150,20 @@ tail -f logs/app.log | grep -E "BEST MATCH|Executing arbitrage|executed"
 
 Test the calculation logic without real trades:
 
+**2-Way Markets (Team1 vs Team2):**
 ```bash
 python3 test_arbitrage.py
+```
+
+**3-Way Markets (Team1, Draw, Team2):**
+```bash
+python3 test_3way_arbitrage.py
 ```
 
 This shows:
 - Stake calculations
 - Expected profits
-- Verification of equal profit on both outcomes
+- Verification of equal profit on all outcomes
 
 ## Risk Management
 
