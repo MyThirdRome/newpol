@@ -41,7 +41,14 @@ monitor_thread = None
 @app.route('/')
 def index():
     """Main dashboard"""
-    return render_template('dashboard.html')
+    response = render_template('dashboard.html')
+    # Add cache-busting headers
+    from flask import make_response
+    resp = make_response(response)
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 @app.route('/api/status')
 def api_status():
