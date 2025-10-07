@@ -285,9 +285,15 @@ class OrderbookMonitor:
                                 outcomes = []
                             
                             # Map token IDs to market names (bidirectional)
+                            # Only subscribe to "Yes" outcomes, skip "No" outcomes
                             for idx, token_id in enumerate(token_ids):
                                 if token_id:
                                     outcome_name = outcomes[idx] if idx < len(outcomes) else f"Option {idx+1}"
+                                    
+                                    # Skip "No" outcomes - we only want the positive outcomes
+                                    if outcome_name == "No":
+                                        continue
+                                    
                                     question = market.get('question', 'Unknown')
                                     
                                     # Parse question to get better names for 3-way markets

@@ -214,6 +214,18 @@
                 <button id="startBtn" class="btn btn-start" onclick="startMonitor()">▶ Start Monitor</button>
                 <button id="stopBtn" class="btn btn-stop" onclick="stopMonitor()" disabled>⏹ Stop Monitor</button>
             </div>
+            
+            <div style="margin-top: 20px; padding: 20px; background: #f3f4f6; border-radius: 10px;">
+                <h3 style="margin-bottom: 10px;">📊 Subscribe to Market</h3>
+                <p style="color: #666; font-size: 0.9em; margin-bottom: 10px;">
+                    Paste Polymarket event URL (e.g., https://polymarket.com/event/epl-not-che-2025-10-18)
+                </p>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="marketUrl" placeholder="https://polymarket.com/event/..." 
+                           style="flex: 1; padding: 12px; border: 2px solid #d1d5db; border-radius: 8px; font-size: 1em;">
+                    <button class="btn btn-refresh" onclick="subscribeToMarket()">➕ Subscribe</button>
+                </div>
+            </div>
         </div>
 
         <div class="stats-grid">
@@ -232,6 +244,15 @@
             <div class="stat-box">
                 <div class="stat-label">⚡ Avg Latency</div>
                 <div class="stat-value" id="latencyText">-</div>
+            </div>
+        </div>
+
+        <div class="card full-width">
+            <h2>📋 Subscribed Markets</h2>
+            <div id="subscribedMarkets">
+                <p style="text-align: center; color: #666; padding: 40px;">
+                    No markets subscribed yet
+                </p>
             </div>
         </div>
 
@@ -262,6 +283,10 @@
         
         // Update total records every 5 seconds
         setInterval(updateTotalRecords, 5000);
+        
+        // Update subscribed markets every 5 seconds
+        setInterval(updateSubscribedMarkets, 5000);
+        updateSubscribedMarkets();
 
 
 
@@ -320,6 +345,113 @@
             }
         }
 
+        async function subscribeToMarket() {
+            const urlInput = document.getElementById('marketUrl');
+            const url = urlInput.value.trim();
+            
+            if (!url) {
+                alert('Please enter a Polymarket URL');
+                return;
+            }
+            
+            // Extract slug from URL
+            // e.g., https://polymarket.com/event/epl-not-che-2025-10-18 -> epl-not-che-2025-10-18
+            let slug = '';
+            if (url.includes('/event/')) {
+                slug = url.split('/event/')[1].split('?')[0].split('#')[0];
+            } else if (url.includes('polymarket.com/')) {
+                slug = url.split('polymarket.com/')[1].split('?')[0].split('#')[0];
+            } else {
+                slug = url; // Assume it's already a slug
+            }
+            
+            if (!slug) {
+                alert('Invalid Polymarket URL');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/subscribe', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({event_slug: slug})
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('✅ Subscribed successfully!');
+                    urlInput.value = '';
+                    updateSubscribedMarkets();
+                } else {
+                    alert('❌ ' + data.message);
+                }
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
+        async function unsubscribeMarket(eventId) {
+            if (!confirm('Unsubscribe from this market?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/unsubscribe', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({event_id: eventId})
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateSubscribedMarkets();
+                } else {
+                    alert('❌ ' + data.message);
+                }
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
+        async function updateSubscribedMarkets() {
+            try {
+                const response = await fetch('/api/subscribed');
+                const markets = await response.json();
+                
+                const container = document.getElementById('subscribedMarkets');
+                
+                if (markets.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No markets subscribed yet</p>';
+                    return;
+                }
+                
+                let html = '<div style="padding: 20px;">';
+                
+                markets.forEach(market => {
+                    const endTime = new Date(market.end_time).toLocaleString();
+                    html += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; margin-bottom: 10px; background: #f9fafb; border-radius: 8px; border: 2px solid #10b981;">
+                        <div>
+                            <div style="font-weight: 600; color: #333; margin-bottom: 5px;">${market.title}</div>
+                            <div style="font-size: 0.9em; color: #666;">Ends: ${endTime}</div>
+                            <div style="font-size: 0.85em; color: #999; margin-top: 3px;">Slug: ${market.slug}</div>
+                        </div>
+                        <button class="btn btn-stop" onclick="unsubscribeMarket('${market.event_id}')" style="padding: 8px 16px;">
+                            ❌ Remove
+                        </button>
+                    </div>
+                    `;
+                });
+                
+                html += '</div>';
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error updating subscribed markets:', error);
+            }
+        }
+
         async function updateOrderbooks() {
             try {
                 const response = await fetch('/api/orderbooks');
@@ -358,18 +490,40 @@
                 // Moneyline section
                 if (moneyline.length > 0) {
                     html += '<h3 style="margin-bottom: 20px; color: #333;">💰 Moneyline (Winner)</h3>';
-                    html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px;">';
+                    
+                    // Determine grid columns based on number of outcomes
+                    const gridCols = moneyline.length === 3 ? 'repeat(3, 1fr)' : '1fr 1fr';
+                    html += `<div style="display: grid; grid-template-columns: ${gridCols}; gap: 15px; margin-bottom: 30px;">`;
+                    
                     moneyline.forEach((ob, idx) => {
                         const teamName = ob.market_name.split(' - ')[1] || 'Team ' + (idx + 1);
-                        const isDodgers = teamName.includes('Dodgers');
                         const atl = atlLookup[ob.market_name];
                         
+                        // Color coding
+                        let bgColor = '#f3f4f6';
+                        let borderColor = '#d1d5db';
+                        let textColor = '#333';
+                        
+                        if (teamName.toLowerCase().includes('draw') || teamName === 'Draw') {
+                            bgColor = '#fef3c7';
+                            borderColor = '#f59e0b';
+                            textColor = '#f59e0b';
+                        } else if (idx === 0) {
+                            bgColor = '#e0f2fe';
+                            borderColor = '#0284c7';
+                            textColor = '#0284c7';
+                        } else {
+                            bgColor = '#fce7f3';
+                            borderColor = '#ec4899';
+                            textColor = '#ec4899';
+                        }
+                        
                         html += `
-                        <div style="background: ${isDodgers ? '#e0f2fe' : '#fef3c7'}; padding: 20px; border-radius: 10px; border: 2px solid ${isDodgers ? '#0284c7' : '#f59e0b'};">
+                        <div style="background: ${bgColor}; padding: 20px; border-radius: 10px; border: 2px solid ${borderColor};">
                             <div style="font-size: 1.1em; font-weight: bold; color: #333; margin-bottom: 10px;">
-                                ${isDodgers ? '🔵' : '🟡'} ${teamName}
+                                ${teamName}
                             </div>
-                            <div style="font-size: 2em; font-weight: bold; color: ${isDodgers ? '#0284c7' : '#f59e0b'};">
+                            <div style="font-size: 2em; font-weight: bold; color: ${textColor};">
                                 $${ob.best_ask.toFixed(2)}
                             </div>
                             <div style="color: #666; font-size: 0.85em; margin-top: 5px;">
