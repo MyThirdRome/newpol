@@ -223,6 +223,11 @@ def api_atl():
     """Get ATL records"""
     return jsonify(monitor.get_atl_records())
 
+@app.route('/api/atl-totals')
+def api_atl_totals():
+    """Get ATL totals (lowest sum of all markets per event)"""
+    return jsonify(monitor.atl_totals)
+
 @app.route('/api/logs')
 def api_logs():
     """Get logs"""

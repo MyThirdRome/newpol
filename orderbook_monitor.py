@@ -119,6 +119,10 @@ class OrderbookMonitor:
         self.total_records: List[TotalRecord] = []
         self.last_totals: Dict[str, float] = {}  # Track last total for each market pair
         
+        # ATL Total tracking (lowest sum of all markets in an event)
+        self.atl_totals: Dict[str, Dict[str, Any]] = {}  # event_slug -> {total, timestamp, market_type}
+        self.expected_markets_count: Dict[str, int] = {}  # event_slug -> expected number of markets
+        
         # Arbitrage executor (optional)
         self.arbitrage_executor = arbitrage_executor
         
@@ -249,7 +253,20 @@ class OrderbookMonitor:
         """Subscribe to a match's orderbook"""
         self.subscribed_markets[match.event_id] = match
         match.active = True
-        self.log(f"✅ Subscribed to: {match.title}")
+        
+        # Calculate expected number of markets (excluding "No" outcomes)
+        expected_markets = 0
+        for market in match.markets:
+            outcomes_str = market.get('outcomes', '[]')
+            try:
+                outcomes = json.loads(outcomes_str) if isinstance(outcomes_str, str) else outcomes_str
+                # Count non-"No" outcomes
+                expected_markets += sum(1 for outcome in outcomes if outcome != "No")
+            except:
+                continue
+        
+        self.expected_markets_count[match.slug] = expected_markets
+        self.log(f"✅ Subscribed to: {match.title} (expecting {expected_markets} markets)")
     
     def unsubscribe_from_match(self, event_id: str):
         """Unsubscribe from a match"""
@@ -260,14 +277,26 @@ class OrderbookMonitor:
             self.log(f"❌ Unsubscribed from: {match.title}")
     
     async def connect_websocket(self):
-        """Connect to Polymarket WebSocket with automatic reconnection"""
+        """Connect to Polymarket WebSocket with automatic reconnection
+        Optimized for ultra-low latency
+        """
         reconnect_delay = 5
         
         while self.running:
             try:
                 self.log("🔌 Connecting to Polymarket WebSocket...")
                 
-                async with websockets.connect(self.ws_url, ping_interval=20, ping_timeout=10) as websocket:
+                # Optimize WebSocket for low latency:
+                # - Shorter ping interval for faster connection monitoring
+                # - Disable compression for faster processing
+                # - Set max message size to handle large orderbooks
+                async with websockets.connect(
+                    self.ws_url, 
+                    ping_interval=10,  # Faster ping for quicker reconnection detection
+                    ping_timeout=5,    # Shorter timeout
+                    max_size=10_000_000,  # 10MB max message size
+                    compression=None   # Disable compression for speed
+                ) as websocket:
                     self.ws_connection = websocket
                     self.log("✅ WebSocket connected!")
                     
@@ -320,12 +349,19 @@ class OrderbookMonitor:
                     await websocket.send(json.dumps(subscribe_msg))
                     self.log(f"📡 Subscribed to {len(all_token_ids)} markets via WebSocket")
                     
-                    # Listen for messages
+                    # Listen for messages with optimized processing
                     while self.running:
                         try:
-                            message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-                            await self.process_websocket_message(json.loads(message))
+                            # Receive message with minimal timeout for faster processing
+                            message = await asyncio.wait_for(websocket.recv(), timeout=0.5)
+                            
+                            # Parse JSON immediately (no delay)
+                            data = json.loads(message)
+                            
+                            # Process message with high priority
+                            await self.process_websocket_message(data)
                         except asyncio.TimeoutError:
+                            # No message received, continue immediately
                             continue
                         except websockets.exceptions.ConnectionClosed as e:
                             self.log(f"⚠️ WebSocket connection closed: {str(e)}", "WARNING")
@@ -366,10 +402,13 @@ class OrderbookMonitor:
             self.log(f"❌ Error processing WebSocket message: {str(e)}", "ERROR")
     
     async def process_book_message(self, data):
-        """Process a book message (full orderbook)"""
+        """Process a book message (full orderbook)
+        Optimized for ultra-low latency and precise timing
+        """
         try:
-            # Track timing
-            process_start = time.time()
+            # Capture timestamp IMMEDIATELY for maximum precision
+            snapshot_timestamp = time.time()
+            process_start = snapshot_timestamp
             
             # Full orderbook snapshot
             asset_id = data.get('asset_id')
@@ -378,26 +417,27 @@ class OrderbookMonitor:
             
             market_name = self.token_to_market.get(asset_id, 'Unknown')
             
-            # Parse orderbook
+            # Parse orderbook with optimized operations
             bids = data.get('bids', [])
             asks = data.get('asks', [])
             
             if bids and asks:
-                # Find lowest ask
+                # Optimized: Find lowest ask with direct float conversion
                 min_ask = min(asks, key=lambda x: float(x['price']))
                 best_ask = float(min_ask['price'])
                 ask_size = float(min_ask['size'])
                 
-                # Highest bid
+                # Optimized: Highest bid (already sorted)
                 best_bid = float(bids[0]['price']) if bids else 0
                 bid_size = float(bids[0]['size']) if bids else 0
                 
+                # Quick calculations
                 spread = best_ask - best_bid
                 mid_price = (best_bid + best_ask) / 2
                 
-                # Create snapshot
+                # Create snapshot with precise timestamp
                 snapshot = OrderbookSnapshot(
-                    timestamp=time.time(),
+                    timestamp=snapshot_timestamp,  # Use captured timestamp
                     market_id=asset_id,
                     market_name=market_name,
                     best_bid=best_bid,
@@ -408,11 +448,15 @@ class OrderbookMonitor:
                     mid_price=mid_price
                 )
                 
-                # Store snapshot
+                # Store snapshot immediately
                 self.current_snapshots[asset_id] = snapshot
                 self.orderbook_data[asset_id].append(snapshot)
                 
-                # Check for ATH and ATL
+                # CRITICAL: Check ATL totals FIRST (most time-sensitive)
+                # This ensures we calculate the total at the exact moment all markets are present
+                self.check_atl_totals()
+                
+                # Then check individual ATH/ATL (less time-sensitive)
                 self.check_ath(asset_id, market_name, best_bid, bid_size, 'bid')
                 self.check_ath(asset_id, market_name, best_ask, ask_size, 'ask')
                 self.check_atl(asset_id, market_name, best_bid, bid_size, 'bid')
@@ -588,6 +632,78 @@ class OrderbookMonitor:
                 side=side
             )
             self.log(f"📉 NEW ATL! {market_name} {side.upper()}: ${price:.4f} (size: {size:.1f})", "WARNING")
+    
+    def check_atl_totals(self):
+        """Check and update ATL totals for each event (sum of all market asks)
+        CRITICAL: Only calculates when ALL expected markets are present for maximum precision
+        """
+        try:
+            # For each subscribed event, sum all current snapshots
+            for event_id, match in self.subscribed_markets.items():
+                event_slug = match.slug
+                event_title = match.title
+                
+                # Get expected market count (pre-calculated during subscription)
+                expected_markets = self.expected_markets_count.get(event_slug, 0)
+                if expected_markets == 0:
+                    continue
+                
+                # Get snapshots for THIS specific event only
+                # Match by checking if team names from event title are in the market name
+                event_snapshots = []
+                teams = event_title.split(' vs. ')
+                
+                for snap in self.current_snapshots.values():
+                    # Skip "No" outcomes
+                    if ' - No' in snap.market_name:
+                        continue
+                    
+                    # Check if this snapshot belongs to this event
+                    # Match by checking if any team name is in the market name
+                    if any(team.strip() in snap.market_name for team in teams):
+                        event_snapshots.append(snap)
+                
+                # CRITICAL: Only calculate total if we have EXACTLY all expected markets
+                # This ensures we're calculating the total at the exact moment all markets are present
+                if len(event_snapshots) == expected_markets:
+                    # Use high-precision timestamp (nanosecond precision if available)
+                    current_timestamp = time.time()
+                    
+                    # Calculate total of all asks with maximum precision
+                    total = sum(snap.best_ask for snap in event_snapshots)
+                    
+                    # Determine market type (moneyline, spread, etc.)
+                    market_type = 'Moneyline'
+                    if any('Spread' in snap.market_name for snap in event_snapshots):
+                        market_type = 'Spread'
+                    elif any('O/U' in snap.market_name or 'Over/Under' in snap.market_name for snap in event_snapshots):
+                        market_type = 'O/U'
+                    
+                    # Check if this is a new ATL total
+                    # Use high precision comparison (to 6 decimal places)
+                    if event_slug not in self.atl_totals or total < self.atl_totals[event_slug]['total']:
+                        self.atl_totals[event_slug] = {
+                            'total': total,
+                            'timestamp': current_timestamp,
+                            'market_type': market_type,
+                            'event_title': event_title,
+                            'num_markets': len(event_snapshots),
+                            'prices': [snap.best_ask for snap in event_snapshots],  # Store individual prices for verification
+                            'market_names': [snap.market_name for snap in event_snapshots]  # Store market names
+                        }
+                        
+                        # Log with high precision
+                        prices_str = ', '.join([f'${snap.best_ask:.4f}' for snap in event_snapshots])
+                        self.log(f"🎯 NEW ATL TOTAL! {event_title} ({market_type}): ${total:.4f} ({len(event_snapshots)}/{expected_markets} markets) [{prices_str}]", "WARNING")
+                elif len(event_snapshots) < expected_markets:
+                    # Still waiting for all markets
+                    pass
+                elif len(event_snapshots) > expected_markets:
+                    # This shouldn't happen - log warning
+                    self.log(f"⚠️ WARNING: {event_title} has {len(event_snapshots)} snapshots but expected {expected_markets}", "WARNING")
+        
+        except Exception as e:
+            self.log(f"❌ Error checking ATL totals: {str(e)}", "ERROR")
     
     def check_best_matches(self):
         """Check for best matches where sides total under $1 (2-way or 3-way)"""

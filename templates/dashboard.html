@@ -257,20 +257,12 @@
         </div>
 
 
-
-        <div class="card full-width">
-            <h2>🎯 Best Matches</h2>
-            <div id="totalRecordsContainer"></div>
-        </div>
     </div>
 
     <script>
         // Update status every 500ms for real-time latency display
         setInterval(updateStatus, 500);
         updateStatus();
-        
-        // Update total records every 5 seconds
-        setInterval(updateTotalRecords, 5000);
         
         // Update subscribed markets (with orderbooks) every second
         setInterval(updateSubscribedMarkets, 1000);
@@ -421,12 +413,15 @@
                 
                 console.log('✅ Found', markets.length, 'markets');
                 
-                // Get orderbooks and ATL data
+                // Get orderbooks, ATL data, and ATL totals
                 const orderbooksResponse = await fetch('/api/orderbooks');
                 const orderbooks = await orderbooksResponse.json();
                 
                 const atlResponse = await fetch('/api/atl');
                 const atlRecords = await atlResponse.json();
+                
+                const atlTotalsResponse = await fetch('/api/atl-totals');
+                const atlTotals = await atlTotalsResponse.json();
                 
                 // Create ATL lookup
                 const atlLookup = {};
@@ -490,6 +485,39 @@
                     const endTime = new Date(group.end_time).toLocaleString();
                     const collapseId = `collapse-${group.slug}`;
                     
+                    // Calculate total for each market type
+                    const moneylineTotal = group.orderbooks.moneyline.reduce((sum, ob) => sum + ob.best_ask, 0);
+                    const spreadTotal = group.orderbooks.spread.reduce((sum, ob) => sum + ob.best_ask, 0);
+                    const totalsTotal = group.orderbooks.totals.reduce((sum, ob) => sum + ob.best_ask, 0);
+                    
+                    // Determine which total to display (prefer moneyline, then spread, then totals)
+                    let displayTotal = 0;
+                    let totalLabel = '';
+                    if (moneylineTotal > 0) {
+                        displayTotal = moneylineTotal;
+                        totalLabel = 'Moneyline Total';
+                    } else if (spreadTotal > 0) {
+                        displayTotal = spreadTotal;
+                        totalLabel = 'Spread Total';
+                    } else if (totalsTotal > 0) {
+                        displayTotal = totalsTotal;
+                        totalLabel = 'O/U Total';
+                    }
+                    
+                    // Get ATL total for this event
+                    const atlTotal = atlTotals[group.slug];
+                    
+                    // Determine color based on total (green if under $1, yellow if close, white otherwise)
+                    let totalBgColor = 'rgba(255,255,255,0.2)';
+                    let totalTextColor = 'white';
+                    if (displayTotal > 0 && displayTotal < 1.0) {
+                        totalBgColor = '#10b981';
+                        totalTextColor = 'white';
+                    } else if (displayTotal >= 1.0 && displayTotal < 1.05) {
+                        totalBgColor = '#f59e0b';
+                        totalTextColor = 'white';
+                    }
+                    
                     html += `
                     <div style="margin-bottom: 15px; border: 2px solid #10b981; border-radius: 10px; overflow: hidden; background: white;">
                         <div onclick="toggleCollapse('${collapseId}')" 
@@ -503,6 +531,13 @@
                                     Ends: ${endTime}
                                 </div>
                             </div>
+                            ${displayTotal > 0 ? `
+                            <div style="background: ${totalBgColor}; padding: 8px 16px; border-radius: 8px; margin-right: 12px; border: 2px solid rgba(255,255,255,0.3);">
+                                <div style="font-size: 0.75em; color: ${totalTextColor}; opacity: 0.9; margin-bottom: 2px;">${totalLabel}</div>
+                                <div style="font-size: 1.4em; font-weight: bold; color: ${totalTextColor};">$${displayTotal.toFixed(2)}</div>
+                                ${atlTotal ? `<div style="font-size: 0.7em; color: ${totalTextColor}; opacity: 0.8; margin-top: 2px;">ATL: $${atlTotal.total.toFixed(2)}</div>` : ''}
+                            </div>
+                            ` : ''}
                             <button class="btn btn-stop" onclick="event.stopPropagation(); unsubscribeMarket('${group.event_id}')" style="padding: 6px 14px; font-size: 0.9em;">
                                 ❌ Remove
                             </button>
@@ -627,58 +662,7 @@
             }
         }
 
-        async function updateTotalRecords() {
-            try {
-                const response = await fetch('/api/total-records?limit=100');
-                const records = await response.json();
-                
-                const container = document.getElementById('totalRecordsContainer');
-                
-                if (records.length === 0) {
-                    container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No data yet. Start monitoring...</p>';
-                    return;
-                }
-                
-                // Group by event and market type, keep only latest
-                const latestRecords = {};
-                records.forEach(record => {
-                    const key = `${record.event_title}_${record.market_type}`;
-                    if (!latestRecords[key] || record.timestamp > latestRecords[key].timestamp) {
-                        latestRecords[key] = record;
-                    }
-                });
-                
-                const uniqueRecords = Object.values(latestRecords);
-                
-                let html = '<div style="padding: 20px;"><table class="orderbook-table"><thead><tr>';
-                html += '<th>Event</th><th>Type</th><th>Side 1</th><th>Price 1</th><th>Side 2</th><th>Price 2</th><th>Total</th><th>Status</th>';
-                html += '</tr></thead><tbody>';
-                
-                uniqueRecords.sort((a, b) => a.total - b.total).forEach(record => {
-                    const statusBadge = record.is_best 
-                        ? '<span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 4px; font-size: 0.85em; font-weight: bold;">🎯 BEST</span>'
-                        : '<span style="background: #6b7280; color: white; padding: 4px 12px; border-radius: 4px; font-size: 0.85em;">Normal</span>';
-                    
-                    html += `
-                    <tr style="${record.is_best ? 'background: #d1fae5; font-weight: 600;' : ''}">
-                        <td style="font-weight: 600;">${record.event_title}</td>
-                        <td>${record.market_type}</td>
-                        <td>${record.side1_name}</td>
-                        <td class="price-ask">$${record.side1_price.toFixed(2)}</td>
-                        <td>${record.side2_name}</td>
-                        <td class="price-ask">$${record.side2_price.toFixed(2)}</td>
-                        <td style="font-weight: bold; font-size: 1.1em; ${record.is_best ? 'color: #10b981;' : ''}">$${record.total.toFixed(2)}</td>
-                        <td>${statusBadge}</td>
-                    </tr>
-                    `;
-                });
-                
-                html += '</tbody></table></div>';
-                container.innerHTML = html;
-            } catch (error) {
-                console.error('Error updating total records:', error);
-            }
-        }
+
     </script>
 </body>
 </html>
